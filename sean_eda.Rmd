@@ -1,0 +1,181 @@
+---
+title: "eda_sean"
+author: "Sean Li"
+date: "4/22/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Exploratory Data Analysis
+
+```{r}
+library(tidyverse)
+```
+Loading in datasets
+```{r}
+agri_employ <- read_csv("datasets/Agricultural Employment.csv")
+agri_data <- read_csv("datasets/Agriculture Dataset.csv")
+crops <- read_csv("datasets/Crop Production.csv")
+exp_invest <- read_csv("datasets/Expenditure Loans and Investment into Agriculture.csv")
+food <- read_csv("datasets/Food Insecurity.csv")
+pov_rate <- read_csv("datasets/Poverty Rate.csv")
+```
+
+
+
+```{r}
+povertycountries <- merge(crops,pov_rate, by.x = c('Area','Year'), by.y = c('Country','Year'))
+povertycountries <- povertycountries %>% 
+  select(Area, Year, Item,`Production - tonnes`, `Percent of Population Below Poverty Line`)
+```
+
+```{r}
+povertycountries %>% 
+  filter(Year == '2020' | Year == '2019' | Year == '2018') %>% 
+  pivot_wider(names_from = Item, values_from = `Production - tonnes`) 
+  
+```
+
+
+```{r}
+top_countries_percrop <- povertycountries %>% 
+  filter(Year == '2020' | Year == '2019' | Year == '2018') %>% 
+  group_by(Item, Area) %>% 
+  summarise(average = mean(`Production - tonnes`)) %>% 
+  arrange(desc = TRUE)
+
+```
+
+
+
+```{r}
+unique(crops$Area)
+```
+
+Steps for animated ggplot. The goal is to look at correlation between expenditure and environmental impact? 
+
+Which countries would benefit the most from foreign investment with respect to their development and environmental impact?
+
+X: Total Expenditure on Agriculture, forestry, fishing (2015 US$)
+Y: CO2 Emissions Intensity aggregated (CO2eq/kg of product)
+Facet: Developing Country or Continent
+Size: GDP per capita
+Color: Country
+
+
+1. Merge data 
+  - need each row to be country in a specific year
+2. Plot
+3. Animate
+
+
+```{r}
+#filling NA with 0
+agri_data[is.na(agri_data)] = 0 
+#getting total emissions aggregated
+filted_emissions_dat <- agri_data %>% 
+  mutate(total_emissions = `Farm-gate emissions - Emissions (CO2eq) (AR5) - kilotonnes` + 
+           `Food Transport - Emissions (CO2eq) (AR5) - kilotonnes` + `Waste - Emissions (CO2eq) (AR5) - kilotonnes` +
+           `Cereals excluding rice-Emissions (CO2eq)-kilotonnes` + `Eggs, hen, in shell-Emissions (CO2eq)-kilotonnes` +
+           `Meat, buffalo-Emissions (CO2eq)-kilotonnes` + `Meat, cattle-Emissions (CO2eq)-kilotonnes` +
+           `Meat, chicken-Emissions (CO2eq)-kilotonnes` + `Meat, goat-Emissions (CO2eq)-kilotonnes` +
+           `Meat, pig-Emissions (CO2eq)-kilotonnes` + `Meat, sheep-Emissions (CO2eq)-kilotonnes` + `Milk, whole fresh buffalo-Emissions (CO2eq)-kilotonnes` + `Milk, whole fresh camel-Emissions (CO2eq)-kilotonnes` + `Milk, whole fresh cow-Emissions (CO2eq)-kilotonnes` +
+           `Milk, whole fresh goat-Emissions (CO2eq)-kilotonnes` + `Milk, whole fresh sheep-Emissions (CO2eq)-kilotonnes`+
+           `Rice, paddy-Emissions (CO2eq)-kilotonnes`) %>% 
+  select(Area, Year, Population,`GDP  (2015 US$, mil)`, `Temperature change °C`, total_emissions)
+
+#select important columns from exp_invest
+filtered_expenses <- exp_invest %>% 
+  mutate(`Agriculture Spending` = `Agriculture, forestry, fishing (General Government) - Value US$, 2015 prices - millions`,
+         `Foreign Investment` = `Foreign Investment into Agriculture, Forestry and Fishing - Value US$, 2015 prices - millions`) %>% 
+  select(Area,Year,`Agriculture Spending`, `Foreign Investment`)
+```
+
+Merge and plot
+
+```{r}
+library(gganimate)
+library(gifski)
+library(png)
+```
+
+
+20K GDP Per Capita
+- 14.33 
+
+merging and GDP Per Capita 
+```{r}
+
+
+
+combined <- merge(filted_emissions_dat,filtered_expenses, by = c("Area","Year")) %>% 
+  filter(Year > 1999)
+
+combined <- combined %>% 
+  mutate(GDP_Per_Capita = round(`GDP  (2015 US$, mil)`*1e6 / Population, 2)) %>% 
+  mutate(developed = ifelse(GDP_Per_Capita*1.1433 > 2*1e4,"Developed","Developing"))
+  
+```
+
+
+animation stuff
+```{r}
+
+animation <- ggplot(combined, aes(x = `Foreign Investment`, y = total_emissions, size = `GDP  (2015 US$, mil)`, colour = developed)) + 
+  geom_point(alpha = 0.5, show.legend = FALSE)+
+  scale_fill_gradient() +
+  #scale_x_log10(limits = c(50,1e5)) +
+  xlim(0,400)+
+  scale_y_log10(limits = c(100,1e7)) +
+  scale_size(range = c(2, 12)) + 
+  facet_wrap(~developed)+
+  labs(subtitle = 'Year: {frame_time}', x = 'Agriculture Expenditure in millions (US$)', y = 'CO2 Emissions (Kilotonnes)', title = 'Relationship Between Agriculture Spending and CO2 Emissions') +
+  transition_time(as.integer(Year)) +
+  #shadow_mark(alpha = 0.3, size = 0.5)+
+  ease_aes('linear', interval = 0.001) +
+  theme_bw()
+
+animate(animation, end_pause = 3,
+         nframes = 100, duration = 20)
+
+```
+1. there is move erratic movement with not developed countries
+2. less developed countries have a high CO2 emission level compared to total agriculture expenditure
+3. generally there is a positive trend between the two.
+
+```{r}
+#saving the animation
+anim_save("agriculture.gif")
+```
+
+```{r}
+watered <- combined %>% 
+  filter(Area == "Syrian Arab Republic" | Area == "Guatemala" | Area == "South Africa" | Area == "Madagascar" | Area == "Mexico") %>% 
+  filter(total_emissions<25000)
+```
+
+
+
+no relationship between foreign investment and agriculture spending
+```{r}
+foreign <- ggplot(combined, aes(y = total_emissions,
+                       x = `Foreign Investment`, color = developed)) +
+  geom_point(alpha = 0.3) +
+  geom_point(data = watered, aes(y = total_emissions,
+                       x = `Foreign Investment`, color = 'Target')) +
+  geom_smooth(method = 'lm', se = FALSE)+
+  scale_x_log10(limits = c(1e0,1e4))+
+  scale_y_log10(limits = c(1e3,1e7)) +
+  labs(x = 'Foreign Investment into Agriculture in millions (US$)', y = 'CO2 Emissions (Kilotonnes)', title = 'Relationship Between Foreign Investment and CO2 Emissions', color = guide_legend(title = "Country Type")) +
+  theme_bw()
+foreign + scale_color_manual(values = c("#00AFBB", "#e8a30e", "#FC4E07")) 
+```
+
+```{r}
+ggsave("foreign.png")
+```
+
+
